@@ -2,42 +2,57 @@ pipeline {
     agent any
 
     parameters {
-        choice(name: 'ACTION', choices: ['deploy', 'rollback', 'switch'], description: 'Deployment action')
-        choice(name: 'TARGET_SLOT', choices: ['auto', 'blue', 'green'], description: 'Target slot for deployment')
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Deployment environment')
+        choice(name: 'ACTION', choices: ['deploy', 'rollback', 'switch'], description: 'Deployment action (prod only)')
+        choice(name: 'TARGET_SLOT', choices: ['auto', 'blue', 'green'], description: 'Target slot for deployment (prod only)')
     }
 
     environment {
         IMAGE_NAME = 'commu-api'
-        IMAGE_TAG = 'latest'
-        BLUE_CONTAINER = 'commu-api-blue'
-        GREEN_CONTAINER = 'commu-api-green'
-        BLUE_PORT = '10300'
-        GREEN_PORT = '10301'
-        SPRING_PROFILE = 'prod'
         ACTIVE_SLOT_FILE = '/opt/commu-api/.active-slot'
     }
 
     stages {
-        stage('Determine Slot') {
+        stage('Initialize') {
             steps {
                 script {
-                    def currentSlot = sh(
-                        script: "cat ${ACTIVE_SLOT_FILE} 2>/dev/null || echo 'blue'",
-                        returnStdout: true
-                    ).trim()
-
-                    if (params.TARGET_SLOT == 'auto') {
-                        env.DEPLOY_SLOT = currentSlot == 'blue' ? 'green' : 'blue'
+                    if (params.ENVIRONMENT == 'dev') {
+                        env.IMAGE_TAG = 'dev'
+                        env.CONTAINER_NAME = 'commu-api-dev'
+                        env.PORT = '10400'
+                        env.SPRING_PROFILE = 'dev'
+                        env.DB_NAME = 'commu_dev'
                     } else {
-                        env.DEPLOY_SLOT = params.TARGET_SLOT
+                        env.IMAGE_TAG = 'latest'
+                        env.SPRING_PROFILE = 'prod'
+                        env.DB_NAME = 'commu'
+                        env.BLUE_CONTAINER = 'commu-api-blue'
+                        env.GREEN_CONTAINER = 'commu-api-green'
+                        env.BLUE_PORT = '10300'
+                        env.GREEN_PORT = '10301'
+
+                        def currentSlot = sh(
+                            script: "cat ${ACTIVE_SLOT_FILE} 2>/dev/null || echo 'blue'",
+                            returnStdout: true
+                        ).trim()
+
+                        if (params.TARGET_SLOT == 'auto') {
+                            env.DEPLOY_SLOT = currentSlot == 'blue' ? 'green' : 'blue'
+                        } else {
+                            env.DEPLOY_SLOT = params.TARGET_SLOT
+                        }
+
+                        env.CURRENT_SLOT = currentSlot
+                        env.CONTAINER_NAME = env.DEPLOY_SLOT == 'blue' ? env.BLUE_CONTAINER : env.GREEN_CONTAINER
+                        env.PORT = env.DEPLOY_SLOT == 'blue' ? env.BLUE_PORT : env.GREEN_PORT
+
+                        echo "Current active slot: ${env.CURRENT_SLOT}"
+                        echo "Deploying to slot: ${env.DEPLOY_SLOT}"
                     }
 
-                    env.CURRENT_SLOT = currentSlot
-                    env.DEPLOY_CONTAINER = env.DEPLOY_SLOT == 'blue' ? env.BLUE_CONTAINER : env.GREEN_CONTAINER
-                    env.DEPLOY_PORT = env.DEPLOY_SLOT == 'blue' ? env.BLUE_PORT : env.GREEN_PORT
-
-                    echo "Current active slot: ${env.CURRENT_SLOT}"
-                    echo "Deploying to slot: ${env.DEPLOY_SLOT}"
+                    echo "Environment: ${params.ENVIRONMENT}"
+                    echo "Container: ${env.CONTAINER_NAME}"
+                    echo "Port: ${env.PORT}"
                 }
             }
         }
@@ -69,20 +84,20 @@ pipeline {
             }
         }
 
-        stage('Deploy to Slot') {
+        stage('Deploy') {
             when {
                 expression { params.ACTION == 'deploy' }
             }
             steps {
                 sh """
-                    docker stop ${DEPLOY_CONTAINER} || true
-                    docker rm ${DEPLOY_CONTAINER} || true
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
                     docker run -d \
-                        --name ${DEPLOY_CONTAINER} \
+                        --name ${CONTAINER_NAME} \
                         --network postgres_default \
-                        -p ${DEPLOY_PORT}:8080 \
+                        -p ${PORT}:8080 \
                         -e SPRING_PROFILES_ACTIVE=${SPRING_PROFILE} \
-                        -e SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/commu \
+                        -e SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME} \
                         -e DB_USERNAME=postgres \
                         -e DB_PASSWORD=postgres \
                         --restart unless-stopped \
@@ -105,7 +120,7 @@ pipeline {
                         sleep(time: 5, unit: 'SECONDS')
                         try {
                             def response = sh(
-                                script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${DEPLOY_PORT}/api/v1/health",
+                                script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${PORT}/api/v1/health",
                                 returnStdout: true
                             ).trim()
                             if (response == '200') {
@@ -127,7 +142,7 @@ pipeline {
 
         stage('Switch Traffic') {
             when {
-                expression { params.ACTION == 'deploy' || params.ACTION == 'switch' }
+                expression { params.ENVIRONMENT == 'prod' && (params.ACTION == 'deploy' || params.ACTION == 'switch') }
             }
             steps {
                 sh "echo '${DEPLOY_SLOT}' > ${ACTIVE_SLOT_FILE}"
@@ -137,7 +152,7 @@ pipeline {
 
         stage('Rollback') {
             when {
-                expression { params.ACTION == 'rollback' }
+                expression { params.ENVIRONMENT == 'prod' && params.ACTION == 'rollback' }
             }
             steps {
                 script {
@@ -151,12 +166,18 @@ pipeline {
 
     post {
         success {
-            echo "Deployment successful! API available at https://api.shaul.link"
-            echo "Active slot: ${DEPLOY_SLOT}"
+            script {
+                if (params.ENVIRONMENT == 'dev') {
+                    echo "Deployment successful! DEV API available at https://dev-api.shaul.link"
+                } else {
+                    echo "Deployment successful! PROD API available at https://api.shaul.link"
+                    echo "Active slot: ${DEPLOY_SLOT}"
+                }
+            }
         }
         failure {
             echo "Deployment failed!"
-            sh "docker logs ${DEPLOY_CONTAINER} --tail 100 || true"
+            sh "docker logs ${CONTAINER_NAME} --tail 100 || true"
         }
     }
 }
