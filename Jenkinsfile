@@ -120,7 +120,7 @@ pipeline {
                         sleep(time: 5, unit: 'SECONDS')
                         try {
                             def response = sh(
-                                script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${PORT}/api/v1/health",
+                                script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${PORT}/actuator/health",
                                 returnStdout: true
                             ).trim()
                             if (response == '200') {
