@@ -89,20 +89,22 @@ pipeline {
                 expression { params.ACTION == 'deploy' }
             }
             steps {
-                sh """
-                    docker stop ${CONTAINER_NAME} || true
-                    docker rm ${CONTAINER_NAME} || true
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        --network laravel_network \
-                        -p ${PORT}:8080 \
-                        -e SPRING_PROFILES_ACTIVE=${SPRING_PROFILE} \
-                        -e SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME} \
-                        -e DB_USERNAME=postgres \
-                        -e DB_PASSWORD=postgres \
-                        --restart unless-stopped \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
-                """
+                withCredentials([string(credentialsId: 'postgres-password', variable: 'DB_PASSWORD')]) {
+                    sh """
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                        docker run -d \
+                            --name ${CONTAINER_NAME} \
+                            --network laravel_network \
+                            -p ${PORT}:8080 \
+                            -e SPRING_PROFILES_ACTIVE=${SPRING_PROFILE} \
+                            -e SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME} \
+                            -e DB_USERNAME=postgres \
+                            -e DB_PASSWORD=${DB_PASSWORD} \
+                            --restart unless-stopped \
+                            ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
             }
         }
 
