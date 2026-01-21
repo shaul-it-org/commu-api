@@ -200,21 +200,22 @@ pipeline {
                     echo "Active slot: ${DEPLOY_SLOT}"
                 }
 
-                try {
-                    slackSend(
-                        channel: env.SLACK_CHANNEL,
-                        color: 'good',
-                        message: """
-                            *${message}*
-                            - Environment: ${env.EFFECTIVE_ENV}
-                            - Action: ${params.ACTION}
-                            - Build: #${BUILD_NUMBER}
-                            - URL: ${url}
-                        """.stripIndent()
-                    )
-                } catch (Exception e) {
-                    echo "Slack notification skipped: ${e.message}"
-                }
+                // TODO: Slack 설정 후 주석 해제
+                // try {
+                //     slackSend(
+                //         channel: env.SLACK_CHANNEL,
+                //         color: 'good',
+                //         message: """
+                //             *${message}*
+                //             - Environment: ${env.EFFECTIVE_ENV}
+                //             - Action: ${params.ACTION}
+                //             - Build: #${BUILD_NUMBER}
+                //             - URL: ${url}
+                //         """.stripIndent()
+                //     )
+                // } catch (Exception e) {
+                //     echo "Slack notification skipped: ${e.message}"
+                // }
             }
         }
         failure {
@@ -237,21 +238,22 @@ pipeline {
                 echo "Deployment failed!"
                 sh "docker logs ${CONTAINER_NAME} --tail 100 || true"
 
-                try {
-                    slackSend(
-                        channel: env.SLACK_CHANNEL,
-                        color: 'danger',
-                        message: """
-                            *${message}*
-                            - Environment: ${env.EFFECTIVE_ENV}
-                            - Action: ${params.ACTION}
-                            - Build: #${BUILD_NUMBER}
-                            - Console: ${BUILD_URL}console
-                        """.stripIndent()
-                    )
-                } catch (Exception e) {
-                    echo "Slack notification skipped: ${e.message}"
-                }
+                // TODO: Slack 설정 후 주석 해제
+                // try {
+                //     slackSend(
+                //         channel: env.SLACK_CHANNEL,
+                //         color: 'danger',
+                //         message: """
+                //             *${message}*
+                //             - Environment: ${env.EFFECTIVE_ENV}
+                //             - Action: ${params.ACTION}
+                //             - Build: #${BUILD_NUMBER}
+                //             - Console: ${BUILD_URL}console
+                //         """.stripIndent()
+                //     )
+                // } catch (Exception e) {
+                //     echo "Slack notification skipped: ${e.message}"
+                // }
             }
         }
     }
