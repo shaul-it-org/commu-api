@@ -10,13 +10,18 @@ pipeline {
     environment {
         IMAGE_NAME = 'commu-api'
         ACTIVE_SLOT_FILE = '/opt/commu-api/.active-slot'
+        SLACK_CHANNEL = '#deployments'
     }
 
     stages {
         stage('Initialize') {
             steps {
                 script {
-                    if (params.ENVIRONMENT == 'dev') {
+                    // JOB_NAME 기반으로 환경 결정 (commu-api-prod → prod, commu-api-dev → dev)
+                    env.EFFECTIVE_ENV = env.JOB_NAME.contains('prod') ? 'prod' : 'dev'
+                    echo "Job: ${env.JOB_NAME}, Environment: ${env.EFFECTIVE_ENV}"
+
+                    if (env.EFFECTIVE_ENV == 'dev') {
                         env.IMAGE_TAG = 'dev'
                         env.CONTAINER_NAME = 'commu-api-dev'
                         env.PORT = '10400'
@@ -50,7 +55,7 @@ pipeline {
                         echo "Deploying to slot: ${env.DEPLOY_SLOT}"
                     }
 
-                    echo "Environment: ${params.ENVIRONMENT}"
+                    echo "Environment: ${env.EFFECTIVE_ENV}"
                     echo "Container: ${env.CONTAINER_NAME}"
                     echo "Port: ${env.PORT}"
                 }
@@ -144,7 +149,7 @@ pipeline {
 
         stage('Switch Traffic') {
             when {
-                expression { params.ENVIRONMENT == 'prod' && (params.ACTION == 'deploy' || params.ACTION == 'switch') }
+                expression { env.EFFECTIVE_ENV == 'prod' && (params.ACTION == 'deploy' || params.ACTION == 'switch') }
             }
             steps {
                 sh "echo '${DEPLOY_SLOT}' > ${ACTIVE_SLOT_FILE}"
@@ -154,7 +159,7 @@ pipeline {
 
         stage('Rollback') {
             when {
-                expression { params.ENVIRONMENT == 'prod' && params.ACTION == 'rollback' }
+                expression { env.EFFECTIVE_ENV == 'prod' && params.ACTION == 'rollback' }
             }
             steps {
                 script {
@@ -169,17 +174,83 @@ pipeline {
     post {
         success {
             script {
-                if (params.ENVIRONMENT == 'dev') {
+                def envLabel = env.EFFECTIVE_ENV == 'prod' ? '' : '[DEV] '
+                def url = env.EFFECTIVE_ENV == 'prod' ?
+                    'https://api.shaul.link' : 'https://dev-api.shaul.link'
+                def message = ""
+
+                switch(params.ACTION) {
+                    case 'deploy':
+                        message = "${envLabel}배포 성공: commu-api"
+                        break
+                    case 'rollback':
+                        message = "${envLabel}롤백 성공: commu-api"
+                        break
+                    case 'switch':
+                        message = "${envLabel}트래픽 전환 성공: commu-api"
+                        break
+                }
+
+                if (env.EFFECTIVE_ENV == 'dev') {
                     echo "Deployment successful! DEV API available at https://dev-api.shaul.link"
                 } else {
                     echo "Deployment successful! PROD API available at https://api.shaul.link"
                     echo "Active slot: ${DEPLOY_SLOT}"
                 }
+
+                try {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'good',
+                        message: """
+                            *${message}*
+                            - Environment: ${env.EFFECTIVE_ENV}
+                            - Action: ${params.ACTION}
+                            - Build: #${BUILD_NUMBER}
+                            - URL: ${url}
+                        """.stripIndent()
+                    )
+                } catch (Exception e) {
+                    echo "Slack notification skipped: ${e.message}"
+                }
             }
         }
         failure {
-            echo "Deployment failed!"
-            sh "docker logs ${CONTAINER_NAME} --tail 100 || true"
+            script {
+                def envLabel = env.EFFECTIVE_ENV == 'prod' ? '' : '[DEV] '
+                def message = ""
+
+                switch(params.ACTION) {
+                    case 'deploy':
+                        message = "${envLabel}배포 실패: commu-api"
+                        break
+                    case 'rollback':
+                        message = "${envLabel}롤백 실패: commu-api"
+                        break
+                    case 'switch':
+                        message = "${envLabel}트래픽 전환 실패: commu-api"
+                        break
+                }
+
+                echo "Deployment failed!"
+                sh "docker logs ${CONTAINER_NAME} --tail 100 || true"
+
+                try {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                            *${message}*
+                            - Environment: ${env.EFFECTIVE_ENV}
+                            - Action: ${params.ACTION}
+                            - Build: #${BUILD_NUMBER}
+                            - Console: ${BUILD_URL}console
+                        """.stripIndent()
+                    )
+                } catch (Exception e) {
+                    echo "Slack notification skipped: ${e.message}"
+                }
+            }
         }
     }
 }
