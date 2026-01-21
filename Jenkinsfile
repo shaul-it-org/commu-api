@@ -9,7 +9,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'commu-api'
-        ACTIVE_SLOT_FILE = '/opt/commu-api/.active-slot'
+        ACTIVE_SLOT_FILE = '/opt/projects/commu-api/.active-slot'
         SLACK_CHANNEL = '#deployments'
         CONFIG_FILE_PROD = 'commu-api-env-prod'
         CONFIG_FILE_DEV = 'commu-api-env-dev'
