@@ -94,7 +94,7 @@ pipeline {
                     docker rm ${CONTAINER_NAME} || true
                     docker run -d \
                         --name ${CONTAINER_NAME} \
-                        --network postgres_default \
+                        --network laravel_network \
                         -p ${PORT}:8080 \
                         -e SPRING_PROFILES_ACTIVE=${SPRING_PROFILE} \
                         -e SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME} \
